@@ -29,7 +29,7 @@ or account team controls enablement.
 
 > **A note on version drift.** Snyk ships Snyk Code accuracy improvements roughly monthly, so
 > finding *counts* move. The *classes* of finding are the stable part. Always capture your own
-> baseline (§3.3) rather than trusting the numbers printed here.
+> baseline (§3.5) rather than trusting the numbers printed here.
 
 ---
 
@@ -39,6 +39,9 @@ or account team controls enablement.
 2. [Git flow branching steps](#2-git-flow-branching-steps)
    - 2.1 [Snyk GitHub Integration](#21-snyk-github-integration)
 3. [Build the apps](#3-build-the-apps)
+   - 3.1 [Build the Node.js app (npm)](#31-build-the-nodejs-app-npm--exact-steps)
+   - 3.2 [Build the .NET app (dotnet)](#32-build-the-net-app-dotnet--exact-steps)
+   - 3.3 [Verified baselines](#33-verified-baselines-from-a-clean-build)
 4. [VS Code Snyk extension](#4-vs-code-snyk-extension)
 5. [Ignore settings](#5-ignore-settings)
 6. [Improvements with the Ignore Approval Workflow](#6-improvements-with-the-ignore-approval-workflow)
@@ -64,11 +67,27 @@ The repository declares its supported range in `package.json`:
 "engines": { "node": "22 - 26" }
 ```
 
-Install a version in that range. A version manager is strongly recommended so you can switch per
-project:
+⚠️ **That range is necessary but not sufficient.** The Angular CLI used by the frontend build
+enforces a stricter floor of its own, and it fails hard rather than warning:
+
+```
+Node.js version v24.13.0 detected.
+The Angular CLI requires a minimum Node.js version of v22.22.3 or v24.15.0 or v26.0.0.
+```
+
+So the version you actually need is one of:
+
+| Line | Minimum that works |
+| --- | --- |
+| Node 22 | **v22.22.3** or later |
+| Node 24 | **v24.15.0** or later |
+| Node 26 | **v26.0.0** or later |
+
+A version manager is strongly recommended so you can switch per project:
 
 ```bash
-# macOS / Linux — nvm
+# macOS / Linux — nvm. `nvm install 24` resolves to the latest 24.x,
+# which clears the v24.15.0 floor.
 nvm install 24
 nvm use 24
 
@@ -82,18 +101,28 @@ winget install OpenJS.NodeJS.LTS
 Verify:
 
 ```bash
-node --version    # expect v22.x – v26.x
+node --version    # expect v22.22.3+ / v24.15.0+ / v26.0.0+
 npm --version
 ```
 
-If `node --version` reports anything outside `22 - 26`, `npm install` will warn or fail on native
-modules. Fix the Node version before continuing — this is the single most common setup failure.
+Two distinct failure modes, and they look nothing alike:
+
+- **Outside `22 - 26` entirely** — `npm install` warns or fails on native modules (`sqlite3`).
+- **Inside `22 - 26` but below the Angular floor** — `npm install` succeeds, then
+  `npm run build` dies on the frontend with the message above. This one is confusing precisely
+  because the install looked fine.
+
+Fix the Node version before continuing — this is the single most common setup failure.
+
+> Bumping *within* a major (e.g. v24.13.0 → v24.19.0) keeps the same native module ABI, so an
+> existing `node_modules` stays valid and needs no reinstall. Crossing a major (24 → 26) changes the
+> ABI: delete `node_modules` and reinstall, or `sqlite3` will fail to load at runtime.
 
 ### 1.2 .NET SDK — optional
 
-This repository is Node.js and TypeScript only; **nothing in §3–§10 needs the .NET SDK.**
+**This** repository is Node.js and TypeScript only; nothing in §3.1 or §4–§10 needs the .NET SDK.
 
-Install it only if you are also running the cross-stack exercises against the companion
+Install it only if you are also running the cross-stack exercises (§3.2) against the companion
 `juice-shop-dotnet` repository, where the same vulnerability classes are demonstrated on a
 compiled, statically typed stack. That is useful when someone in the room believes SAST is a
 scripting-language problem.
@@ -112,9 +141,19 @@ winget install Microsoft.DotNet.SDK.8
 Verify:
 
 ```bash
-dotnet --list-sdks       # expect 8.0.x
+dotnet --list-sdks
 dotnet --list-runtimes
 ```
+
+**Any SDK from 8.0 upward works — you do not need the 8.0 SDK specifically.** The API project
+targets `net8.0` but sets `<RollForward>Major</RollForward>`, so a newer SDK builds and runs it
+without the .NET 8 runtime installed. Verified for this course on SDK **10.0.302** with no .NET 8
+runtime present at all.
+
+The one wrinkle is the **test** project, which targets `net10.0` on purpose — `dotnet test` hosts its
+in-process `TestServer` on the system runtime, and `Microsoft.AspNetCore.Mvc.Testing` has to match
+that runtime. If you want everything on genuine .NET 8, install the ASP.NET Core 8 runtime and
+retarget `tests/JuiceShop.Tests/JuiceShop.Tests.csproj` to `net8.0` with `Mvc.Testing 8.0.x`.
 
 ### 1.3 Snyk CLI — required
 
@@ -129,6 +168,20 @@ brew install snyk
 scoop install snyk
 ```
 
+> ⚠️ **If you use nvm, prefer Homebrew (or the standalone binary) over `npm install -g`.** nvm keeps
+> global npm packages **per Node version**. Install the CLI under v24.13.0, then follow §1.1 and
+> `nvm use` a newer 24.x, and `snyk` vanishes:
+>
+> ```
+> $ nvm use 24 && snyk --version
+> zsh: command not found: snyk
+> ```
+>
+> Nothing is broken — you're just looking at a different `bin` directory. Either reinstall under the
+> new version (`npm install -g snyk@latest`) or install it outside nvm so it survives Node switches.
+> **Your authentication is safe either way**: the token lives in `~/.config/configstore/snyk.json`,
+> outside any Node version, so you do not need to re-run `snyk auth`.
+
 Authenticate. This opens a browser; log in with SSO if your company uses it:
 
 ```bash
@@ -141,7 +194,7 @@ snyk --version
 | Feature | Minimum CLI |
 | --- | --- |
 | `snyk ignore create` / Ignore Approval Workflow (§5–§6) | **v1.1297.1** |
-| Reachability flags (§3.3, Snyk Preview) | v1.1301.0 |
+| Reachability flags (§3.5, Snyk Preview) | v1.1301.0 |
 | `snyk doctor` diagnostics | v1.1306.0 |
 
 Snyk supports CLI, IDE and CI plugin versions for 12 months. Anything older than that is
@@ -175,6 +228,19 @@ Run this **before** the session starts. Every line must succeed:
 ```bash
 node --version && npm --version && git --version && snyk --version
 ```
+
+Check the Node version against the **Angular floor** in §1.1 — v22.22.3 / v24.15.0 / v26.0.0 — not
+just against `22 - 26`. A version that satisfies `engines` but not the floor installs cleanly and then
+fails the build, which is a bad thing to discover at 09:05.
+
+Then do the slow part ahead of time (§3.1) — it is the one step you cannot recover from in a live
+session:
+
+```bash
+npm install --legacy-peer-deps && npm run build && snyk test --all-projects
+```
+
+Expect `Projects tested: 2 projects`, and expect a non-zero exit code — issues are the content here.
 
 If anything fails, `snyk doctor` (CLI v1.1306.0+) reports on auth, connectivity, proxy and
 configuration in one pass.
@@ -333,31 +399,208 @@ import is often something developers can do themselves.
 You need a working build so that (a) Snyk Open Source can resolve the full dependency tree, and
 (b) you can prove your fixes didn't break anything.
 
-### 3.1 Install and run
+### 3.1 Build the Node.js app (npm) — exact steps
+
+**Snyk Open Source cannot scan this repository until `node_modules` exists.** There is no lockfile:
+both `.npmrc` files set `package-lock=false`, so `snyk test` has nothing to resolve a dependency tree
+from and fails outright rather than reporting zero issues:
+
+```
+ERROR   Unspecified Error (SNYK-CLI-0000)
+        Failed to get dependencies for all 2 potential projects.
+        .../package.json:          Missing node_modules folder: we can't test without
+                                   dependencies. Please run 'npm install' first.
+        .../frontend/package.json: Missing node_modules folder: ...
+```
+
+Both manifests need their own `node_modules`. Run these four commands from the repository root, in
+order:
 
 ```bash
-# from the repository root
-npm install          # postinstall also installs + builds the Angular frontend
+# 0. Confirm the Node version FIRST — see §1.1. Below v24.15.0 step 2 fails.
+node --version
+
+# 1. Install root + frontend dependencies.
+#    --legacy-peer-deps is REQUIRED — see the note below.
+npm install --legacy-peer-deps
+
+# 2. Build the Angular frontend and compile the TypeScript server
+npm run build
+
+# 3. Run it
 npm start            # serves on http://localhost:3000
 ```
 
-`npm install` on this repo is slow — the `postinstall` hook runs `cd frontend && npm install`, then
-builds the frontend and the server. **Budget 5–10 minutes on a cold run and do it before the
-session.**
+> #### Why `--legacy-peer-deps` is mandatory
+>
+> A plain `npm install` **fails** on this repo. The root install succeeds, then the `postinstall`
+> hook (`cd frontend && npm install && … && npm run build:frontend`) dies with `ERESOLVE`:
+> `angularx-qrcode@21.0.5` declares an `@angular/core@^21.0.0` peer while the frontend is on
+> `@angular/core@^22.0.1`. `frontend/package.json` *has* `overrides` intended to reconcile this, but
+> npm 11.x still refuses to resolve the tree. The error text blames `rxjs@7.8.2` against a peer range
+> of `^6.5.3 || ^7.4.0` — **that is a red herring**, since 7.8.2 satisfies that range. Don't spend
+> time on the rxjs line.
+>
+> `--legacy-peer-deps` at the root is enough on its own: npm exports it to child processes through
+> `npm_config_legacy_peer_deps`, so the nested frontend install inherits it. You do **not** need to
+> install the frontend separately.
+
+**Timing.** Budget **5–10 minutes** on a cold run (empty npm cache) and do it before the session —
+`postinstall` installs and builds the whole Angular frontend. On a warm cache it is much faster:
+measured ~**72 s** for step 1 and ~**13 s** for step 2 on an Apple-silicon laptop. If step 1 returns in
+seconds, it did nothing — check the verification block below.
+
+> **Step 1 already runs step 2 for you.** `postinstall` ends with
+> `npm run build:frontend && (npm run --silent build:server || cd .)`, so a successful install leaves
+> `build/` and `frontend/dist/` populated. Run `npm run build` anyway: the `|| cd .` in that hook
+> **swallows a server compile failure**, so a broken `tsc` looks like a clean install. Step 2 is how
+> you find out.
+
+**`npm warn allow-scripts` is expected — do not chase it.** npm 11.17+ gates *dependencies'* install
+scripts behind an approval list, and you will see warnings like:
+
+```
+npm warn allow-scripts 2 packages have install scripts not yet covered by allowScripts:
+npm warn allow-scripts   cypress@15.19.0 (postinstall: node dist/index.js --exec install)
+npm warn allow-scripts   libxmljs2@0.37.0 (install: prebuild-install || node-gyp rebuild)
+```
+
+`package.json` has an `allowScripts` block covering `sqlite3`, `esbuild` and `cypress`, but versions
+drift out of it. This does **not** affect the build, the server, or any Snyk scan. The one real
+consequence is that a blocked `cypress` postinstall means no Cypress binary, so only
+`npm run test:e2e` is affected — nothing in this course. Approve them if you want them:
+
+```bash
+npm approve-scripts --allow-scripts-pending    # review interactively
+```
+
+**Verify each step actually worked.** Success is not "no red text scrolled past":
+
+```bash
+# 1. Both dependency trees present — neither should be missing or empty
+ls node_modules | wc -l            # ~846 top-level entries
+ls frontend/node_modules | wc -l   # ~496 top-level entries
+
+# 2. Build artifacts present
+ls build/app.js                    # compiled server (tsc output)
+ls frontend/dist/frontend/         # Angular production bundle
+
+# 3. The server answers
+curl -s http://localhost:3000/rest/admin/application-version
+# => {"version":"20.2.0-SNAPSHOT"}
+```
+
+**Then confirm Snyk resolves both manifests** — this is the whole point of the build:
+
+```bash
+snyk test --all-projects
+```
+
+You want to see `Projects tested: 2 projects`. Anything less means one `node_modules` is missing.
+
+> **If you see `3 potential projects` and one failure**, that third one is `build/package.json` — the
+> `tsc` output directory carries a copy of the manifest but has no `node_modules` of its own. It is
+> harmless noise. Silence it with `snyk test --all-projects --exclude=build`. The same thing happens
+> for *any* stray `package.json` under the repo root, so never park a `node_modules` backup there —
+> `--all-projects` will try to test every package inside it.
+
+> ⚠️ **`snyk test` exits non-zero when it finds issues — that is success, not failure.** On this
+> deliberately vulnerable repo a zero exit code would mean something went wrong. Judge the outcome by
+> the summary block, not by `$?`.
 
 Other useful targets, all real scripts in `package.json`:
 
 ```bash
 npm run build          # build:frontend + build:server
+npm run build:server   # tsc only — fast re-check after editing a .ts file
 npm run serve:dev      # watch mode, backend + frontend concurrently
 npm run test:server    # server unit tests (Node built-in test runner)
 npm run test:api       # API integration tests (Supertest)
 npm run test:frontend  # Angular unit tests (Vitest)
 npm run lint
+npm run rsn            # Refactoring Safety Net — required after challenge-code edits
 npm run sbom           # CycloneDX SBOM → bom.json, useful with `snyk sbom test`
 ```
 
-### 3.2 What makes this repo a good target
+> When iterating on a Snyk Code fix in `routes/` or `lib/`, run `npm run build:server` rather than
+> the full `npm run build`. It skips the Angular bundle and takes seconds.
+
+### 3.2 Build the .NET app (dotnet) — exact steps
+
+**Optional**, and only for the cross-stack exercises. This is a **separate repository**
+(`lmaeda/juice-shop-dotnet`), not a directory of this one. Clone it as a sibling:
+
+```bash
+# from the parent directory of your juice-shop clone
+git clone https://github.com/lmaeda/juice-shop-dotnet.git
+cd juice-shop-dotnet/dotnet          # note: the solution lives in the dotnet/ subdirectory
+```
+
+The solution is `JuiceShop.sln`, with two projects — `src/JuiceShop.Api` (`net8.0`) and
+`tests/JuiceShop.Tests` (`net10.0`, see §1.2).
+
+```bash
+# 1. Restore NuGet packages (Snyk needs this to resolve the dependency graph)
+dotnet restore JuiceShop.sln
+
+# 2. Build
+dotnet build JuiceShop.sln --no-restore
+
+# 3. Test — 8 xUnit tests, functional + exploitation
+dotnet test JuiceShop.sln --no-build
+
+# 4. Run
+dotnet run --project src/JuiceShop.Api
+```
+
+**Expect `NU1902` / `NU1903` warnings on restore and build.** They are the point — NuGet is flagging
+the intentionally outdated packages (`Newtonsoft.Json 12.0.3`, `RestSharp 106.11.7`,
+`SharpZipLib 1.3.2`, `System.IdentityModel.Tokens.Jwt 6.24.0`, and the transitive
+`SQLitePCLRaw.lib.e_sqlite3 2.1.6`). `NuGetAudit` is set to `false` in `JuiceShop.Api.csproj` so they
+don't turn the build red; the packages stay vulnerable and Snyk still reports them.
+
+Success looks like:
+
+```
+JuiceShop.Api   -> src/JuiceShop.Api/bin/Debug/net8.0/JuiceShop.Api.dll
+JuiceShop.Tests -> tests/JuiceShop.Tests/bin/Debug/net10.0/JuiceShop.Tests.dll
+Build succeeded.  7 Warning(s)  0 Error(s)
+
+Passed!  Failed: 0, Passed: 8, Skipped: 0, Total: 8
+```
+
+Then scan it — run these **from `juice-shop-dotnet/dotnet/`**, not from the Node repo:
+
+```bash
+snyk test --all-projects     # Open Source: 2 projects
+snyk code test               # Snyk Code (SAST)
+```
+
+> **`dotnet restore` is the .NET equivalent of `npm install` for Snyk's purposes.** Skip it and
+> `snyk test` fails the same way the Node repo does without `node_modules` — Snyk reads the restored
+> `project.assets.json`, not the `.csproj` alone.
+
+### 3.3 Verified baselines from a clean build
+
+Captured on the `ai-agent-snyk-fix-training` branch with Node **v24.19.0**, npm **11.17.0**, Snyk CLI
+**1.1306.2**, .NET SDK **10.0.302**. Treat these as a shape-check that your build is complete, not as
+targets — counts drift (see the version-drift note in the preamble, and Appendix A). The useful signal
+is **"2 projects tested" plus a three-digit Node SCA count**, not the exact numbers.
+
+| Stack | Command | Result |
+| --- | --- | --- |
+| Node | `snyk test --all-projects` | **2 projects**, 103 security + 2 license issues |
+| ↳ `package.json` | | 714 deps · **95 issues** / 158 vulnerable paths |
+| ↳ `frontend/package.json` | | 463 deps · **8 security + 2 license** issues |
+| Node | `snyk code test` | **293 issues** — 26 high, 11 medium, 256 low |
+| .NET | `snyk test --all-projects` | **2 projects**, 11 issues — 3 high, 8 medium |
+| .NET | `snyk code test` | **14 issues** — 11 high, 2 medium, 1 low |
+
+> The `snyk code test` count is **source-only**. `build/`, `frontend/dist/` and `node_modules/` are
+> all gitignored and Snyk Code honours `.gitignore`, so building first does not inflate your SAST
+> numbers. Worth saying out loud — people assume it does.
+
+### 3.4 What makes this repo a good target
 
 | Surface | Why it matters for this course |
 | --- | --- |
@@ -369,9 +612,10 @@ npm run sbom           # CycloneDX SBOM → bom.json, useful with `snyk sbom tes
 | `terraform/`, `infrastructure/terraform/` | Intentionally insecure IaC, including a committed RSA private key |
 | No `.snyk` file, no Snyk CI workflow | Clean slate — you create both during the labs |
 
-### 3.3 First scan — the baseline
+### 3.5 First scan — the baseline
 
-Run all scan types and **keep the output**; you'll compare against it after fixing.
+Run all scan types and **keep the output**; you'll compare against it after fixing. Everything here
+assumes §3.1 completed — without `node_modules` the Open Source test fails rather than reporting zero.
 
 ```bash
 # from the repository root
@@ -1343,6 +1587,18 @@ byte-identical apart from Dockerfile paths in `main.tf`), so expect duplicate fi
 | --- | --- |
 | `npm install` fails on native modules | Node version outside `22 - 26`. Check `node --version` first, always |
 | `npm install` takes forever | expected — `postinstall` installs and builds the whole Angular frontend. 5–10 min cold |
+| `npm install` fails with `ERESOLVE` in `postinstall` | use `npm install --legacy-peer-deps` (§3.1). `angularx-qrcode@21` peer-conflicts with Angular 22. The `rxjs@7.8.2` line in the error is a red herring |
+| `snyk test` → `Missing node_modules folder` / `Failed to get dependencies for all 2 potential projects` | you haven't run `npm install` — and there is no lockfile to fall back on (`package-lock=false` in both `.npmrc` files). See §3.1 |
+| `snyk test --all-projects` reports only 1 project | one of the two `node_modules` trees is missing — usually `frontend/`, because `postinstall` died. Re-run with `--legacy-peer-deps` |
+| `npm run build` → `The Angular CLI requires a minimum Node.js version of v22.22.3 or v24.15.0 or v26.0.0` | Node satisfies `engines` but not the Angular floor. `nvm install 24 && nvm use 24` (§1.1) |
+| `sqlite3` fails to load after switching Node | you crossed a major (24 → 26), changing the native ABI. `rm -rf node_modules` and reinstall |
+| `command not found: snyk` right after `nvm use` | nvm scopes global npm packages per Node version. Reinstall (`npm install -g snyk@latest`) or install outside nvm (§1.3). Your auth token is unaffected |
+| Scans suddenly fail with `Client request cannot be processed (SNYK-0003)` / `400 Bad Request` | **usually an expired login, not a malformed request.** `snyk auth` tokens are short-lived OAuth tokens. Confirm with `snyk doctor` — look for `✗ [AUTHENTICATION]` — then re-run `snyk auth`. A mid-session expiry is common in a long workshop |
+| `snyk test --all-projects` reports far more projects than you have, or crawls | it found `package.json` files in a stray directory — `build/` (the `tsc` output includes one), a `node_modules` backup, or a copy of the repo. Use `--exclude=build` / `--detection-depth`, and never keep a `node_modules` backup inside the repo |
+| `snyk test` exits non-zero and you think the scan broke | **expected.** Findings cause a non-zero exit. Read the summary block, not `$?` |
+| `dotnet` restore/build shows `NU1902` / `NU1903` warnings | expected — NuGet flagging the intentionally outdated packages. The build still succeeds |
+| `snyk test` finds nothing in the .NET repo | run `dotnet restore` first; Snyk reads the restored `project.assets.json`, not the `.csproj` |
+| .NET `dotnet test` fails on `PipeWriter` / `System.Text.Json` | runtime/`Mvc.Testing` mismatch — the test project must target the runtime you actually have (§1.2) |
 | `snyk code test` → "no supported files" | you're not in the repo root, or Snyk Code is disabled for your org |
 | `snyk test` finds only one manifest | you need `--all-projects` to pick up `frontend/package.json` |
 | SARIF upload is empty for SCA | expected — `--sarif-file-output` returns no results for Open Source tests |
@@ -1450,5 +1706,3 @@ This course was retargeted from the dual-stack `juice-shop-dotnet` repository to
 
 - <https://support.snyk.io> · <mailto:support@snyk.io>
 - Snyk Developer Community — <https://community.snyk.io>
-</content>
-</invoke>
