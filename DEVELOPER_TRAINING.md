@@ -249,13 +249,29 @@ configuration in one pass.
 
 ## 2. Git flow branching steps
 
-This repository follows the upstream Juice Shop model with one addition for this course:
+This repository follows the upstream Juice Shop model, with one branch added for this course:
 
 - **`master`** is the release branch. Nobody commits to it.
-- **`develop`** is the integration branch and the target for all training pull requests.
-- **`ai-agent-snyk-fix-training`** is the pre-staged base for the AI remediation labs (§8–§9).
-- Your work happens on short-lived feature branches, and every exercise ends in a pull request into
-  `develop` so you can watch the Snyk PR check run.
+- **`develop`** is the upstream integration branch. **This course does not use it.**
+- **`ai-agent-snyk-fix-training`** is the base for **every** exercise, and the target for every
+  training pull request.
+- Your work happens on short-lived feature branches, and each exercise ends in a pull request into
+  `ai-agent-snyk-fix-training` so you can watch the Snyk PR check run.
+
+> ⚠️ **Do not branch from `develop`, and do not open training PRs into it.** The course materials —
+> this document, both decks, both instructor guides — live **only** on
+> `ai-agent-snyk-fix-training`. `git checkout develop` deletes the file you are reading from your
+> working tree. Confirm it for yourself:
+>
+> ```bash
+> git cat-file -e develop:DEVELOPER_TRAINING.md
+> # fatal: path 'DEVELOPER_TRAINING.md' exists on disk, but not in 'develop'
+> ```
+>
+> `ai-agent-snyk-fix-training` is exactly `develop` plus those five files, so you lose nothing by
+> ignoring `develop` entirely. It also means a branch based on the training branch but PR'd into
+> `develop` produces a diff containing all ~1,700 documentation lines and ~17 MB of decks — noise no
+> reviewer can read.
 
 > This fork uses `master`, not `main`. If you have muscle memory for `main`, expect
 > `git checkout main` to fail.
@@ -279,19 +295,26 @@ git remote -v
 
 ### Create your training branch
 
-```bash
-git checkout develop
-git pull upstream develop
-
-# One branch per exercise. Naming convention for this course:
-#   snyk-training/<your-initials>/<exercise>
-git checkout -b snyk-training/lm/01-first-scan
-```
-
-For the AI labs in §8–§9, branch from the pre-staged branch instead:
+Always branch from `ai-agent-snyk-fix-training` — for **every** exercise, not just §8–§9:
 
 ```bash
 git fetch upstream
+
+# One branch per exercise. Naming convention for this course:
+#   snyk-training/<your-initials>/<exercise>
+git checkout -b snyk-training/lm/01-first-scan upstream/ai-agent-snyk-fix-training
+```
+
+Confirm you have the course materials before going further — if this lists nothing, you branched from
+the wrong place:
+
+```bash
+ls DEVELOPER_TRAINING.md Snyk-Developer-Training.pptx
+```
+
+The same pattern for any later exercise, changing only the branch name:
+
+```bash
 git checkout -b snyk-training/lm/08-agentic-fix upstream/ai-agent-snyk-fix-training
 ```
 
@@ -312,26 +335,42 @@ git commit -m "fix(sca): bump sanitize-html to a non-vulnerable version"
 git push -u origin snyk-training/lm/01-first-scan
 ```
 
-Open the pull request **into `develop`** (not `master`). The Snyk PR check runs here — that's §10.
+Open the pull request **into `ai-agent-snyk-fix-training`** — not `develop`, not `master`. GitHub
+defaults the base to the repository's default branch (`master` here), so **you must change the base
+branch in the PR form.** Getting this wrong is the most common mistake in §10: the diff fills with
+unrelated commits and the Snyk PR check reports on the wrong comparison. The Snyk PR check runs
+here — that's §10.
 
 ### Branch reference
 
 | Branch | Purpose | Commit to it? |
 | --- | --- | --- |
 | `master` | release / stable | No |
-| `develop` | integration target for all training PRs | No — open a PR into it |
+| `develop` | upstream integration branch — **not used by this course**, and has none of the course materials | No |
+| `ai-agent-snyk-fix-training` | base for **all** exercises and the PR target | Branch from it; PR into it |
 | `snyk-training/<initials>/<exercise>` | your work | Yes |
-| `ai-agent-snyk-fix-training` | pre-staged base for the AI remediation labs (§8–§9) | Branch from it |
 
 ### Resetting between exercises
 
 The intentionally vulnerable code *is* the training content, so revert rather than fix when you want
-a clean start:
+a clean start. Start the next exercise's branch from the training branch, then delete the old one —
+you can't delete the branch you are standing on:
 
 ```bash
-git checkout develop
-git branch -D snyk-training/lm/01-first-scan   # discard the exercise branch
-git pull upstream develop
+git fetch upstream
+
+# start the next exercise fresh from the training branch
+git checkout -b snyk-training/lm/02-ignores upstream/ai-agent-snyk-fix-training
+
+# now discard the finished one
+git branch -D snyk-training/lm/01-first-scan
+```
+
+To throw away uncommitted changes without changing branch:
+
+```bash
+git checkout -- .          # revert tracked files
+git clean -fd              # remove new files (leaves gitignored build output alone)
 ```
 
 ---
@@ -380,9 +419,15 @@ import is often something developers can do themselves.
    If Projects are missing, a product may be disabled for your org, or those files were excluded at
    import. That's an admin question, not a bug.
 
-4. **Check the monitored branch.** Project settings → confirm the monitored branch is `develop` (or
-   `master`, matching your team's convention). The monitored branch is what recurring tests and every
+4. **Check the monitored branch.** Project settings → set the monitored branch to
+   **`ai-agent-snyk-fix-training`** for this course. Snyk defaults it to the repository's default
+   branch (`master`), which is *not* where you are working — so the baselines in Appendix A won't
+   match what the UI shows until you change it. The monitored branch is what recurring tests and every
    reporting number are based on, and it is the setting people most often get wrong.
+
+   > In your own repositories this would normally be `develop` or `master`, matching your team's
+   > convention. It is `ai-agent-snyk-fix-training` here only because that is the branch carrying the
+   > course.
 
 5. **Set your personal notifications.** Account settings → **Notifications**. Your admin sets org
    defaults; you override for yourself.
@@ -1252,7 +1297,7 @@ git checkout -b snyk-training/lm/08-agentic-fix upstream/ai-agent-snyk-fix-train
 3. Read **every** diff before accepting. Look specifically for the three failure modes in §8.4.
 4. `npm run test:server && npm run test:api` — did it break the challenge tests? Good.
 5. `snyk code test` — did the count actually drop?
-6. Commit, push, open a PR into `develop`, and watch the PR check (§10).
+6. Commit, push, open a PR into `ai-agent-snyk-fix-training`, and watch the PR check (§10).
 
 **Docs:** <https://docs.snyk.io/agent-security/agentic-security-with-snyk-studio/getting-started-with-snyk-studio>
 
@@ -1412,7 +1457,7 @@ name: Snyk
 
 on:
   push:
-    branches: [develop]
+    branches: [ai-agent-snyk-fix-training]
   pull_request:
 
 jobs:
@@ -1422,8 +1467,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
-      - run: npm ci --ignore-scripts
+          node-version: 24        # resolves to latest 24.x, clearing the Angular floor (§1.1)
+
+      # NOT `npm ci` — there is no lockfile in this repo (package-lock=false).
+      # NOT `--ignore-scripts` — postinstall is what installs frontend/node_modules,
+      # and Snyk needs it to resolve the second manifest. See §3.1.
+      - run: npm install --legacy-peer-deps
+
       - run: npm install -g snyk@latest
 
       - name: Snyk Open Source test
@@ -1443,7 +1493,7 @@ jobs:
           sarif_file: snyk-code.sarif
 
       - name: Snyk monitor
-        if: github.ref == 'refs/heads/develop'
+        if: github.ref == 'refs/heads/ai-agent-snyk-fix-training'
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         run: snyk monitor --all-projects
@@ -1451,13 +1501,19 @@ jobs:
 
 It needs a `SNYK_TOKEN` repository secret.
 
-Three things to notice, and they're the teaching points:
+Four things to notice, and they're the teaching points:
 
 1. **`--severity-threshold=high` is what makes this a gate.** Without it the job passes on anything.
 2. **`--sarif-file-output` returns no results for Open Source tests** — it's a Snyk Code flag here.
    Don't wire an SCA SARIF upload and wonder why the Security tab is empty.
-3. **`snyk monitor` runs last, and only on `develop`.** The monitored snapshot should track green
-   builds on your integration branch, not every feature branch.
+3. **`snyk monitor` runs last, and only on the course's integration branch.** The monitored snapshot
+   should track green builds on one branch, not every feature branch. Keep this in step with the
+   monitored branch you set in §2.1 — if the workflow publishes from one branch while Snyk monitors
+   another, your dashboard silently describes code nobody is working on.
+4. **The install step is `npm install --legacy-peer-deps`, not `npm ci --ignore-scripts`.** Both of the
+   obvious choices fail here: `npm ci` needs a lockfile this repo doesn't have, and `--ignore-scripts`
+   suppresses the `postinstall` that installs `frontend/node_modules` — so `--all-projects` would
+   silently drop to one project. This is the CI version of §3.1.
 
 If you want the scans to *report* without failing the pipeline while people are learning, add
 `continue-on-error: true` to the test steps — then remove it, because a gate that can't fail isn't a
@@ -1468,10 +1524,11 @@ gate.
 1. On a branch, deliberately reintroduce a vulnerable dependency:
 
    ```bash
-   npm install sanitize-html@1.4.2
+   npm install sanitize-html@1.4.2 --legacy-peer-deps
    ```
 
-2. Commit, push, open a PR into `develop`.
+2. Commit, push, open a PR into `ai-agent-snyk-fix-training` — remember to change the base branch in
+   the PR form (§2).
 3. Watch the Snyk check fail. Read the details page.
 4. Fix it — bump to a clean version — push, and watch the check go green **on the same PR**.
 5. Open a second PR that introduces a Snyk Code finding: string-concatenate a query parameter into a
@@ -1485,7 +1542,8 @@ gate.
 
 ## Appendix A — Expected findings
 
-Baseline for this repository, `ai-agent-snyk-fix-training` branch.
+Baseline for this repository, `ai-agent-snyk-fix-training` branch — the branch every exercise is based
+on (§2). If your numbers are wildly different, check you are actually on it before assuming drift.
 
 > Counts drift — Snyk ships Snyk Code accuracy releases roughly monthly, and the vulnerability
 > database changes daily. Capture your own baseline and treat everything here as approximate. The
