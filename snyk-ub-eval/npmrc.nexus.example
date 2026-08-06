@@ -1,0 +1,16 @@
+# npm -> on-prem Nexus, for the Snyk Universal Broker registry evaluation.
+#
+# Copy to .npmrc ONLY in a local working copy. Do NOT commit it as the repo's
+# real .npmrc: it points at localhost, so it would break every other clone and CI.
+#
+# npm expands ${VAR} from the environment, so no credential is stored here:
+#   ( set -a; . ./.env_snyk_ub; set +a; npm ci --ignore-scripts )
+#
+# npm-all is a GROUP repo: snyksuccess-nexus-npm (hosted, private packages) is
+# ordered before npm-proxy (registry.npmjs.org), so private packages shadow upstream.
+
+registry=${NEXUS_NPM_REGISTRY}
+//localhost:8091/repository/npm-all/:_auth=${NEXUS_AUTH_BASE64}
+//localhost:8091/repository/npm-all/:always-auth=true
+audit=false
+fund=false
